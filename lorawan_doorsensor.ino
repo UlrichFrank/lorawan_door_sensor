@@ -74,11 +74,12 @@ void updateDisplay() {
     timeStr = String(seconds) + "s";
   }
   
-  // Clear and update display
+  // Clear display first
   display.clear();
-  display.setFont(ArialMT_Plain_16);
   
   // Line 1: Status
+  display.setFont(ArialMT_Plain_16);
+  display.setTextAlignment(TEXT_ALIGN_LEFT);
   display.drawString(0, 0, "LoRaWAN Door Sensor");
   
   // Line 2: Reed state
@@ -90,6 +91,7 @@ void updateDisplay() {
   display.setFont(ArialMT_Plain_16);
   display.drawString(0, 48, "Next TX: " + timeStr);
   
+  // write the buffer to the display (like in SimpleDemo)
   display.display();
 }
 
@@ -176,9 +178,10 @@ void sendData(int reedState) {
 
 void setup() {
   heltec_setup();
+  // Display is already initialized by heltec_setup()
   
-  // Initialising the UI will init the display too.
-  display.init();
+  // Force flush of serial
+  delay(100);
   
     // Force flush of serial
   delay(100);
@@ -203,13 +206,19 @@ void setup() {
   Serial.println("Initializing display...");
   Serial.flush();
   
-    display.clear();
+  Serial.println("DEBUG: Clearing display...");
+  display.clear();
+  Serial.println("DEBUG: Setting font...");
   display.setFont(ArialMT_Plain_16);
+  Serial.println("DEBUG: Drawing string 1...");
   display.drawString(0, 0, "LoRaWAN Door Sensor");
+  Serial.println("DEBUG: Drawing string 2...");
   display.drawString(0, 20, "Initializing...");
+  Serial.println("DEBUG: Calling display.display()...");
   display.display();
-  Serial.println("Display updated");
+  Serial.println("DEBUG: Display.display() completed");
   Serial.flush();
+  delay(500);
   
   // Check if provisioning is available
   Serial.println("Checking LoRaWAN provisioning...");
