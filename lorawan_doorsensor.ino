@@ -1,34 +1,38 @@
 /**
  * 
- * FOR THIS EXAMPLE TO WORK, YOU MUST INSTALL THE "LoRaWAN_ESP32" LIBRARY USING
- * THE LIBRARY MANAGER IN THE ARDUINO IDE.
+ * FOR THIS EXAMPLE TO WORK, YOU MUST INSTALL:
+ * 1. "heltec_esp32" library using LIBRARY MANAGER (search "heltec_esp32")
+ * 2. "LoRaWAN_ESP32" library using LIBRARY MANAGER
+ * 3. ESP32 board support: Add https://espressif.github.io/arduino-esp32/package_esp32_index.json to settings
+ * 4. Install "esp32 by Espressif Systems" from board manager
+ * 5. Select board: "Heltec WiFi LoRa 32(V3) / Wireless shell(V3)"
  * 
  * This code continuously monitors a reed switch contact on GPIO4 and sends
  * LoRaWAN messages when the contact state changes OR every 15 minutes,
  * whichever comes first. The device runs without deep sleep in continuous mode.
  *
+ * The OLED display shows:
+ * - Door state (OPEN/CLOSED)
+ * - Time until next periodic LoRaWAN transmission (in minutes or seconds)
+ *
  * If your NVS partition does not have stored TTN / LoRaWAN provisioning
  * information in it yet, you will be prompted for them on the serial port and
  * they will be stored for subsequent use.
  *
+ * See https://github.com/ropg/heltec_esp32_lora_v3
  * See https://github.com/ropg/LoRaWAN_ESP32
-*/
+ */
+
 
 
 // Send interval: 15 minutes in milliseconds (without deep sleep)
 #define SEND_INTERVAL 900000
 
-// do not use oled
-#define NO_DISPLAY
-#define NO_DISPLAY_INSTANCE     // Verhindert Erstellung der Display-Instanz
-#define HELTEC_NO_DISPLAY      // Deaktiviert Display in der Heltec-Bibliothek
-
-//button press will wake it up and a long press will turn it off.
+// button press will wake it up and a long press will turn it off.
 #define HELTEC_POWER_BUTTON
 
 #include <heltec_unofficial.h>
 #include <LoRaWAN_ESP32.h>
-#include "driver/rtc_io.h"
 
 //#define REED_GPIO 4
 #define REED_GPIO GPIO_NUM_4
@@ -44,6 +48,50 @@ RTC_DATA_ATTR uint8_t count = 0;
 // State tracking for continuous monitoring
 int lastReedState = -1;
 unsigned long lastSendTime = 0;
+unsigned long lastDisplayUpdate = 0;
+
+void updateDisplay() {
+  // Only update display every 1 second to reduce flicker
+  unsigned long now = millis();
+  if (now - lastDisplayUpdate < 1000) {
+    return;
+  }
+  lastDisplayUpdate = now;
+  
+  int reedState = digitalRead(REED_GPIO);
+  unsigned long timeSinceLastSend = (now - lastSendTime);
+  unsigned long timeUntilNextSend = SEND_INTERVAL - timeSinceLastSend;
+  
+  // Calculate display string for time remaining
+  String timeStr;
+  if (timeUntilNextSend > 60000) {
+    // More than 1 minute: show in minutes
+    unsigned long minutes = timeUntilNextSend / 60000;
+    timeStr = String(minutes) + "m";
+  } else {
+    // Less than 1 minute: show in seconds
+    unsigned long seconds = timeUntilNextSend / 1000;
+    timeStr = String(seconds) + "s";
+  }
+  
+  // Clear and update display
+  display.clear();
+  display.setFont(ArialMT_Plain_16);
+  
+  // Line 1: Status
+  display.drawString(0, 0, "LoRaWAN Door Sensor");
+  
+  // Line 2: Reed state
+  display.setFont(ArialMT_Plain_24);
+  String reedStr = (reedState == OPENED) ? "OPEN" : "CLOSED";
+  display.drawString(0, 20, "Door: " + reedStr);
+  
+  // Line 3: Time until next send
+  display.setFont(ArialMT_Plain_16);
+  display.drawString(0, 48, "Next TX: " + timeStr);
+  
+  display.display();
+}
 
 float heltec_vbat_v3_2() {
   // ADC resolution
@@ -148,14 +196,30 @@ void setup() {
   lastReedState = reedState;
   Serial.printf("Initial reed state: %d (%s)\n", reedState, reedState == OPENED ? "OPENED" : "CLOSED");
   
+  // Initialize display with startup message
+  display.clear();
+  display.setFont(ArialMT_Plain_16);
+  display.drawString(0, 0, "LoRaWAN Door Sensor");
+  display.drawString(0, 20, "Initializing...");
+  display.display();
+  
   // Check if provisioning is available
   Serial.println("Checking LoRaWAN provisioning...");
   if (!persist.isProvisioned()) {
     Serial.println("ERROR: No provisioning data found. Please use Arduino IDE serial monitor to provision.");
     Serial.println("You need to restart the device and enter provisioning info via serial port.");
     Serial.println("The device will remain in this state until provisioning is done.");
+    
+    display.clear();
+    display.setFont(ArialMT_Plain_10);
+    display.drawString(0, 10, "ERROR: No provisioning");
+    display.drawString(0, 25, "Use Serial Monitor");
+    display.drawString(0, 40, "to enter credentials");
+    display.drawString(0, 55, "Then restart device");
+    display.display();
+    
     while (true) {
-      heltec_delay(1000);  // Block here until user provisions
+      heltec_delay(1000);
     }
   }
   
@@ -164,6 +228,9 @@ void setup() {
   // Try initial send on boot
   sendData(reedState);
   lastSendTime = millis();
+  
+  // Show initial state on display
+  updateDisplay();
 }
 
 void loop() {
@@ -189,6 +256,9 @@ void loop() {
     lastSendTime = currentTime;
     lastReedState = reedState;
   }
+  
+  // Update display (throttled to 1 second)
+  updateDisplay();
   
   // Poll every 2 seconds
   heltec_delay(2000);
