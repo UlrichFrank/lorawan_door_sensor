@@ -74,23 +74,33 @@ void updateDisplay() {
     timeStr = String(seconds) + "s";
   }
   
-  // Clear and update display
-  display.clear();
-  display.setFont(ArialMT_Plain_16);
+  // Only try to update display if it exists
+  if (!display.isLayoutFitted()) {
+    return;
+  }
   
-  // Line 1: Status
-  display.drawString(0, 0, "LoRaWAN Door Sensor");
-  
-  // Line 2: Reed state
-  display.setFont(ArialMT_Plain_24);
-  String reedStr = (reedState == OPENED) ? "OPEN" : "CLOSED";
-  display.drawString(0, 20, "Door: " + reedStr);
-  
-  // Line 3: Time until next send
-  display.setFont(ArialMT_Plain_16);
-  display.drawString(0, 48, "Next TX: " + timeStr);
-  
-  display.display();
+  try {
+    // Clear and update display
+    display.clear();
+    display.setFont(ArialMT_Plain_16);
+    
+    // Line 1: Status
+    display.drawString(0, 0, "LoRaWAN Door Sensor");
+    
+    // Line 2: Reed state
+    display.setFont(ArialMT_Plain_24);
+    String reedStr = (reedState == OPENED) ? "OPEN" : "CLOSED";
+    display.drawString(0, 20, "Door: " + reedStr);
+    
+    // Line 3: Time until next send
+    display.setFont(ArialMT_Plain_16);
+    display.drawString(0, 48, "Next TX: " + timeStr);
+    
+    display.display();
+  } catch (...) {
+    // If display fails, just continue
+    Serial.println("WARNING: Display update failed");
+  }
 }
 
 float heltec_vbat_v3_2() {
@@ -183,7 +193,13 @@ void sendData(int reedState) {
 
 void setup() {
   heltec_setup();
-  Serial.println("\n\n=== LoRaWAN Door Sensor (Continuous Mode) ===");
+  
+  // Force flush of serial
+  delay(100);
+  
+  Serial.println("\n\n");
+  Serial.println("=== LoRaWAN Door Sensor (Continuous Mode) ===");
+  Serial.flush();
 
   // default is 10 due to backward compatibility
   analogReadResolution(12);
@@ -195,20 +211,34 @@ void setup() {
   int reedState = digitalRead(REED_GPIO);
   lastReedState = reedState;
   Serial.printf("Initial reed state: %d (%s)\n", reedState, reedState == OPENED ? "OPENED" : "CLOSED");
+  Serial.flush();
   
-  // Initialize display with startup message
-  display.clear();
-  display.setFont(ArialMT_Plain_16);
-  display.drawString(0, 0, "LoRaWAN Door Sensor");
-  display.drawString(0, 20, "Initializing...");
-  display.display();
+  // Try to initialize and update display - with error handling
+  Serial.println("Initializing display...");
+  Serial.flush();
+  
+  if (display.isLayoutFitted()) {
+    Serial.println("Display is available");
+    display.clear();
+    display.setFont(ArialMT_Plain_16);
+    display.drawString(0, 0, "LoRaWAN Door Sensor");
+    display.drawString(0, 20, "Initializing...");
+    display.display();
+    Serial.println("Display updated");
+  } else {
+    Serial.println("WARNING: Display not available");
+  }
+  Serial.flush();
   
   // Check if provisioning is available
   Serial.println("Checking LoRaWAN provisioning...");
+  Serial.flush();
+  
   if (!persist.isProvisioned()) {
     Serial.println("ERROR: No provisioning data found. Please use Arduino IDE serial monitor to provision.");
     Serial.println("You need to restart the device and enter provisioning info via serial port.");
     Serial.println("The device will remain in this state until provisioning is done.");
+    Serial.flush();
     
     display.clear();
     display.setFont(ArialMT_Plain_10);
@@ -224,6 +254,7 @@ void setup() {
   }
   
   Serial.println("Provisioning OK. Attempting to join network...");
+  Serial.flush();
   
   // Try initial send on boot
   sendData(reedState);
@@ -231,6 +262,9 @@ void setup() {
   
   // Show initial state on display
   updateDisplay();
+  
+  Serial.println("Setup complete");
+  Serial.flush();
 }
 
 void loop() {
