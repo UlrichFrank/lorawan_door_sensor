@@ -74,33 +74,23 @@ void updateDisplay() {
     timeStr = String(seconds) + "s";
   }
   
-  // Only try to update display if it exists
-  if (!display.isLayoutFitted()) {
-    return;
-  }
+  // Clear and update display
+  display.clear();
+  display.setFont(ArialMT_Plain_16);
   
-  try {
-    // Clear and update display
-    display.clear();
-    display.setFont(ArialMT_Plain_16);
-    
-    // Line 1: Status
-    display.drawString(0, 0, "LoRaWAN Door Sensor");
-    
-    // Line 2: Reed state
-    display.setFont(ArialMT_Plain_24);
-    String reedStr = (reedState == OPENED) ? "OPEN" : "CLOSED";
-    display.drawString(0, 20, "Door: " + reedStr);
-    
-    // Line 3: Time until next send
-    display.setFont(ArialMT_Plain_16);
-    display.drawString(0, 48, "Next TX: " + timeStr);
-    
-    display.display();
-  } catch (...) {
-    // If display fails, just continue
-    Serial.println("WARNING: Display update failed");
-  }
+  // Line 1: Status
+  display.drawString(0, 0, "LoRaWAN Door Sensor");
+  
+  // Line 2: Reed state
+  display.setFont(ArialMT_Plain_24);
+  String reedStr = (reedState == OPENED) ? "OPEN" : "CLOSED";
+  display.drawString(0, 20, "Door: " + reedStr);
+  
+  // Line 3: Time until next send
+  display.setFont(ArialMT_Plain_16);
+  display.drawString(0, 48, "Next TX: " + timeStr);
+  
+  display.display();
 }
 
 float heltec_vbat_v3_2() {
@@ -158,9 +148,6 @@ void sendData(int reedState) {
     return;
   }
 
-  // Manages uplink intervals to the TTN Fair Use Policy
-  node->setDutyCycle(true, 1250);
-
   uint8_t uplinkData[7];
   uplinkData[0] = count++;
   uplinkData[1] = temp + 100; 
@@ -185,16 +172,15 @@ void sendData(int reedState) {
   
   // Save session for next time
   persist.saveSession(node);
-  
-  // Calculate time until next allowed transmission
-  uint32_t nextTX = node->timeUntilUplink();
-  Serial.printf("Next TX possible in %u seconds\n", nextTX);
 }
 
 void setup() {
   heltec_setup();
   
-  // Force flush of serial
+  // Initialising the UI will init the display too.
+  display.init();
+  
+    // Force flush of serial
   delay(100);
   
   Serial.println("\n\n");
@@ -217,17 +203,12 @@ void setup() {
   Serial.println("Initializing display...");
   Serial.flush();
   
-  if (display.isLayoutFitted()) {
-    Serial.println("Display is available");
     display.clear();
-    display.setFont(ArialMT_Plain_16);
-    display.drawString(0, 0, "LoRaWAN Door Sensor");
-    display.drawString(0, 20, "Initializing...");
-    display.display();
-    Serial.println("Display updated");
-  } else {
-    Serial.println("WARNING: Display not available");
-  }
+  display.setFont(ArialMT_Plain_16);
+  display.drawString(0, 0, "LoRaWAN Door Sensor");
+  display.drawString(0, 20, "Initializing...");
+  display.display();
+  Serial.println("Display updated");
   Serial.flush();
   
   // Check if provisioning is available
