@@ -71,6 +71,12 @@ float heltec_vbat_v3_2() {
 }
 
 void sendData(int reedState) {
+  // Check if we have provisioning info and radio is available
+  if (!persist.isProvisioned()) {
+    Serial.println("ERROR: No provisioning data. Cannot send.");
+    return;
+  }
+  
   float temp = heltec_temperature();
   float vbat = heltec_vbat_v3_2();
   uint16_t vbat_milivolt = (uint16_t)(vbat * 1000.0f);
@@ -118,16 +124,46 @@ void sendData(int reedState) {
   } else {
     Serial.printf("sendReceive returned error %d, we'll try again later.\n", state);
   }
+  
+  // Save session for next time
+  persist.saveSession(node);
+  
+  // Calculate time until next allowed transmission
+  uint32_t nextTX = node->timeUntilUplink();
+  Serial.printf("Next TX possible in %u seconds\n", nextTX);
 }
 
 void setup() {
   heltec_setup();
+  Serial.println("\n\n=== LoRaWAN Door Sensor (Continuous Mode) ===");
 
   // default is 10 due to backward compatibility
   analogReadResolution(12);
 
   // Reed-Kontakt on GPIO4 as input
   pinMode(REED_GPIO, INPUT_PULLUP);
+  
+  // Read initial reed state and send immediately
+  int reedState = digitalRead(REED_GPIO);
+  lastReedState = reedState;
+  Serial.printf("Initial reed state: %d (%s)\n", reedState, reedState == OPENED ? "OPENED" : "CLOSED");
+  
+  // Check if provisioning is available
+  Serial.println("Checking LoRaWAN provisioning...");
+  if (!persist.isProvisioned()) {
+    Serial.println("ERROR: No provisioning data found. Please use Arduino IDE serial monitor to provision.");
+    Serial.println("You need to restart the device and enter provisioning info via serial port.");
+    Serial.println("The device will remain in this state until provisioning is done.");
+    while (true) {
+      heltec_delay(1000);  // Block here until user provisions
+    }
+  }
+  
+  Serial.println("Provisioning OK. Attempting to join network...");
+  
+  // Try initial send on boot
+  sendData(reedState);
+  lastSendTime = millis();
 }
 
 void loop() {
@@ -137,17 +173,23 @@ void loop() {
   unsigned long currentTime = millis();
   
   // Check if state changed OR 15 minutes have passed since last send
-  bool stateChanged = (lastReedState != -1) && (reedState != lastReedState);
+  bool stateChanged = (reedState != lastReedState);
   bool intervalExceeded = (currentTime - lastSendTime > SEND_INTERVAL);
   
   if (stateChanged || intervalExceeded) {
-    Serial.printf("[%lu ms] Sending: State %s, Reed: %d\n", 
-                  currentTime, stateChanged ? "CHANGED" : "TIMER", reedState);
+    if (!persist.isProvisioned()) {
+      Serial.println("WARNING: Provisioning data missing. Cannot send.");
+      heltec_delay(2000);
+      return;
+    }
+    
+    Serial.printf("[%lu ms] Trigger: %s, Reed: %d\n", 
+                  currentTime, stateChanged ? "STATE_CHANGED" : "TIMER_15MIN", reedState);
     sendData(reedState);
     lastSendTime = currentTime;
     lastReedState = reedState;
   }
   
-  // Poll every 2 seconds (TTN Fair Use Policy: max ~30 messages/day is enforced by LoRaWAN library)
+  // Poll every 2 seconds
   heltec_delay(2000);
 }
