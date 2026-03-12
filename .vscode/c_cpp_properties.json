@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "name": "Arduino",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "~/Library/Arduino15/packages/heltec/hardware/esp32/0.0.9/**",
+                "~/Documents/Arduino/libraries/**"
+            ],
+            "forcedInclude": [],
+            "defines": [
+                "ARDUINO=100"
+            ],
+            "macFrameworkPath": [],
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "macos-clang-x64"
+        }
+    ],
+    "version": 4
+}

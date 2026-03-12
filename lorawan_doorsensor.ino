@@ -3,9 +3,9 @@
  * FOR THIS EXAMPLE TO WORK, YOU MUST INSTALL THE "LoRaWAN_ESP32" LIBRARY USING
  * THE LIBRARY MANAGER IN THE ARDUINO IDE.
  * 
- * This code will send a two-byte LoRaWAN message every 15 minutes. The first
- * byte is a simple 8-bit counter, the second is the ESP32 chip temperature
- * directly after waking up from its 15 minute sleep in degrees celsius + 100.
+ * This code continuously monitors a reed switch contact on GPIO4 and sends
+ * LoRaWAN messages when the contact state changes OR every 15 minutes,
+ * whichever comes first. The device runs without deep sleep in continuous mode.
  *
  * If your NVS partition does not have stored TTN / LoRaWAN provisioning
  * information in it yet, you will be prompted for them on the serial port and
@@ -15,12 +15,8 @@
 */
 
 
-// Pause between sends in seconds, so this is every 15 minutes. (Delay will be
-// longer if regulatory or TTN Fair Use Policy requires it.)
-#define MINIMUM_DELAY_CLOSED 86400 
-#define MINIMUM_DELAY_OPENED 300
-#define WAKEUP_ON_CLOSED ESP_EXT1_WAKEUP_ALL_LOW
-#define WAKEUP_ON_OPENED ESP_EXT1_WAKEUP_ANY_HIGH
+// Send interval: 15 minutes in milliseconds (without deep sleep)
+#define SEND_INTERVAL 900000
 
 // do not use oled
 #define NO_DISPLAY
@@ -44,6 +40,10 @@
 LoRaWANNode* node;
 
 RTC_DATA_ATTR uint8_t count = 0;
+
+// State tracking for continuous monitoring
+int lastReedState = -1;
+unsigned long lastSendTime = 0;
 
 float heltec_vbat_v3_2() {
   // ADC resolution
@@ -97,12 +97,14 @@ void sendData(int reedState) {
   // Manages uplink intervals to the TTN Fair Use Policy
   node->setDutyCycle(true, 1250);
 
-  uint8_t uplinkData[5];
+  uint8_t uplinkData[7];
   uplinkData[0] = count++;
   uplinkData[1] = temp + 100; 
   uplinkData[2] = vbat_milivolt >> 8;
   uplinkData[3] = vbat_milivolt & 0xFF;
   uplinkData[4] = reedState;  // HIGH (1) = offen, LOW (0) = geschlossen
+  uplinkData[5] = vbat_percentage >> 8;
+  uplinkData[6] = vbat_percentage & 0xFF;
 
   uint8_t downlinkData[256];
   size_t lenDown = sizeof(downlinkData);
@@ -121,70 +123,31 @@ void sendData(int reedState) {
 void setup() {
   heltec_setup();
 
-  // Sofort nach dem Aufwachen Wake-up Grund prüfen
-  esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
-  Serial.print("Wake up reason: ");
-  switch(wakeup_reason) {
-    case ESP_SLEEP_WAKEUP_EXT1: 
-      Serial.println("External trigger (Reed contact)"); 
-      break;
-    case ESP_SLEEP_WAKEUP_TIMER: 
-      Serial.println("Timer"); 
-      break;
-    case ESP_SLEEP_WAKEUP_UNDEFINED:
-      Serial.println("Undefined (normal boot)");
-      break;
-    default: 
-      Serial.printf("Other: %d\n", wakeup_reason); 
-      break;
-  }
-  
   // default is 10 due to backward compatibility
   analogReadResolution(12);
 
-  // Reed-Kontakt on GPIO4 as Wakeup-Source
-  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
-  rtc_gpio_pullup_en(REED_GPIO); // Verwenden statt pinMode(REED_GPIO, INPUT_PULLUP), da pinMode deepsleep nicht überlebt
-  rtc_gpio_pulldown_dis(REED_GPIO);
-  //pinMode(REED_GPIO, INPUT_PULLUP);
-
-#ifdef DEBUG
-#else
-  int reedState = digitalRead(REED_GPIO);  // Liest den Zustand des Reed-Kontakts
-  sendData(reedState);
-
-  // Does not return, program starts over next round
-  if (reedState == OPENED) {
-    goToSleep(MINIMUM_DELAY_OPENED, WAKEUP_ON_CLOSED);
-  } else {
-    goToSleep(MINIMUM_DELAY_CLOSED, WAKEUP_ON_OPENED);
-  }
-#endif
+  // Reed-Kontakt on GPIO4 as input
+  pinMode(REED_GPIO, INPUT_PULLUP);
 }
 
 void loop() {
-  #ifdef DEBUG
-    heltec_loop();
-    heltec_delay(1000);
-    int reedState = digitalRead(REED_GPIO);  // Liest den Zustand des Reed-Kontakts
-    Serial.printf("reed: %d, %s\n", reedState, reedState == OPENED ? "OPEN" : "CLOSED");
-  #endif
-}
-
-void goToSleep(int delay, esp_sleep_ext1_wakeup_mode_t wakeupMode) {
-  Serial.println("Going to deep sleep now");
-  // allows recall of the session after deepsleep
-  persist.saveSession(node);
-  // Calculate minimum duty cycle delay (per FUP & law!)
-  uint32_t interval = node->timeUntilUplink();
-  // And then pick it or our MINIMUM_DELAY, whichever is greater
-  uint32_t delayMs = max(interval, (uint32_t)delay * 1000);
-
-  esp_sleep_enable_ext1_wakeup(1ULL << REED_GPIO, wakeupMode);
- 
-  Serial.printf("Next TX in %i s. Wakeup On: %d\n", delayMs/1000, (int) wakeupMode);
-  heltec_delay(100);  // So message prints
-
-  // and off to bed we go
-  heltec_deep_sleep(delayMs/1000);
+  heltec_loop();
+  
+  int reedState = digitalRead(REED_GPIO);
+  unsigned long currentTime = millis();
+  
+  // Check if state changed OR 15 minutes have passed since last send
+  bool stateChanged = (lastReedState != -1) && (reedState != lastReedState);
+  bool intervalExceeded = (currentTime - lastSendTime > SEND_INTERVAL);
+  
+  if (stateChanged || intervalExceeded) {
+    Serial.printf("[%lu ms] Sending: State %s, Reed: %d\n", 
+                  currentTime, stateChanged ? "CHANGED" : "TIMER", reedState);
+    sendData(reedState);
+    lastSendTime = currentTime;
+    lastReedState = reedState;
+  }
+  
+  // Poll every 2 seconds (TTN Fair Use Policy: max ~30 messages/day is enforced by LoRaWAN library)
+  heltec_delay(2000);
 }

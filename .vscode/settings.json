@@ -1,0 +1,10 @@
+{
+    "arduino.path": "/Applications/Arduino.app",
+    "arduino.commandPath": "arduino-cli",
+    "arduino.additionalUrls": [
+        "https://github.com/Heltec-Aaron-Lee/WiFi_Kit_series/releases/download/0.0.9/package_heltec_esp32_index.json"
+    ],
+    "arduino.logLevel": "verbose",
+    "arduino.enableUSBDetection": true,
+    "C_Cpp.intelliSenseEngine": "default"
+}
